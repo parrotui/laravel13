@@ -21,11 +21,10 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      - name: Setup Node.js
+      - name: Setup Node.js 24
         uses: actions/setup-node@v5
         with:
           node-version: "24"
-          cache: npm
 
       - name: Check Environment
         run: |
@@ -55,7 +54,7 @@ jobs:
 
       - name: Install NPM Dependencies
         run: |
-          npm ci
+          npm install
 
       - name: Build Frontend
         run: |
@@ -65,6 +64,7 @@ jobs:
         run: |
           php artisan --version
           composer show filament/filament
+          echo "Frontend build:"
           ls -lah public/build
 
       - name: Prepare Deployment Package
@@ -79,12 +79,12 @@ jobs:
             --exclude="tests" \
             ./ deploy/
 
-      - name: Create ZIP
+      - name: Create Production ZIP
         run: |
           cd deploy
           zip -r ../laravel13-filament5-production.zip .
 
-      - name: Upload Artifact
+      - name: Upload Production Artifact
         uses: actions/upload-artifact@v5
         with:
           name: laravel13-filament5-production
