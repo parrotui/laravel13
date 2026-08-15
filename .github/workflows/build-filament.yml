@@ -7,19 +7,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ==========================================
-      # 1. 获取 13.x 分支
-      # ==========================================
       - name: Checkout
         uses: actions/checkout@v5
         with:
           ref: 13.x
           fetch-depth: 1
 
-      # ==========================================
-      # 2. PHP 8.4
-      # ==========================================
-      - name: Setup PHP
+      - name: Setup PHP 8.4
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.4"
@@ -27,27 +21,27 @@ jobs:
           coverage: none
           tools: composer:v2
 
-      # ==========================================
-      # 3. 检查环境
-      # ==========================================
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+
       - name: Check Environment
         run: |
           php -v
           composer -V
+          node -v
+          npm -v
 
-      # ==========================================
-      # 4. 安装 Laravel Composer 依赖
-      # ==========================================
-      - name: Install Laravel Dependencies
+      - name: Install Composer Dependencies
         run: |
           composer install \
             --prefer-dist \
             --no-interaction \
-            --no-progress
+            --no-progress \
+            --optimize-autoloader
 
-      # ==========================================
-      # 5. 安装 Filament 5
-      # ==========================================
       - name: Install Filament 5
         run: |
           composer require filament/filament:^5.0 \
@@ -55,24 +49,24 @@ jobs:
             --no-interaction \
             --no-progress
 
-      # ==========================================
-      # 6. 初始化 Filament
-      # ==========================================
       - name: Install Filament Panel
         run: |
           php artisan filament:install --panels
 
-      # ==========================================
-      # 7. 检查 Laravel / Filament 版本
-      # ==========================================
+      - name: Install NPM Dependencies
+        run: |
+          npm ci
+
+      - name: Build Frontend
+        run: |
+          npm run build
+
       - name: Check Versions
         run: |
           php artisan --version
           composer show filament/filament
+          ls -lah public/build
 
-      # ==========================================
-      # 8. 准备部署文件
-      # ==========================================
       - name: Prepare Deployment Package
         run: |
           mkdir -p deploy
@@ -85,20 +79,14 @@ jobs:
             --exclude="tests" \
             ./ deploy/
 
-      # ==========================================
-      # 9. 创建 ZIP
-      # ==========================================
       - name: Create ZIP
         run: |
           cd deploy
-          zip -r ../laravel13-filament5.zip .
+          zip -r ../laravel13-filament5-production.zip .
 
-      # ==========================================
-      # 10. 上传 Artifact
-      # ==========================================
       - name: Upload Artifact
         uses: actions/upload-artifact@v5
         with:
-          name: laravel13-filament5
-          path: laravel13-filament5.zip
+          name: laravel13-filament5-production
+          path: laravel13-filament5-production.zip
           retention-days: 7
