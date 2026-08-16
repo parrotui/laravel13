@@ -12,8 +12,9 @@ permissions:
   contents: read
 
 env:
-  PHP_VERSION: '8.4'
-  NODE_VERSION: '24'
+  PHP_VERSION: "8.4"
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10"
 
 jobs:
   build:
@@ -22,7 +23,7 @@ jobs:
 
     steps:
       # --------------------------------------------------
-      # 1. 拉取代码
+      # 1. Checkout
       # --------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v6
@@ -34,7 +35,7 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
-          extensions: mbstring, bcmath, intl, pdo_mysql, redis
+          extensions: mbstring, bcmath, intl, pdo_mysql
           tools: composer:v2
           coverage: none
 
@@ -45,30 +46,19 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: |
-            pnpm-lock.yaml
-            admin/pnpm-lock.yaml
 
       # --------------------------------------------------
-      # 4. pnpm
+      # 4. Install pnpm
       # --------------------------------------------------
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      # --------------------------------------------------
-      # 5. 检查 PHP
-      # --------------------------------------------------
-      - name: PHP Version
+      - name: Install pnpm
         run: |
-          php -v
-          composer --version
+          npm install --global pnpm@${PNPM_VERSION}
+          pnpm --version
+          node --version
+          npm --version
 
       # --------------------------------------------------
-      # 6. 安装 Laravel Composer 生产依赖
+      # 5. Composer
       # --------------------------------------------------
       - name: Install Composer Dependencies
         run: |
@@ -80,7 +70,7 @@ jobs:
             --optimize-autoloader
 
       # --------------------------------------------------
-      # 7. 安装 Laravel 前端依赖
+      # 6. Install root frontend dependencies
       # --------------------------------------------------
       - name: Install Root Frontend Dependencies
         if: hashFiles('pnpm-lock.yaml') != ''
@@ -88,23 +78,33 @@ jobs:
           pnpm install --frozen-lockfile
 
       # --------------------------------------------------
-      # 8. 安装 Shadcn Admin
+      # 7. Build root frontend
+      # --------------------------------------------------
+      - name: Build Root Frontend
+        if: hashFiles('pnpm-lock.yaml') != ''
+        run: |
+          pnpm build
+
+      # --------------------------------------------------
+      # 8. Install Shadcn Admin
       # --------------------------------------------------
       - name: Install Shadcn Admin Dependencies
+        if: hashFiles('admin/pnpm-lock.yaml') != ''
         working-directory: admin
         run: |
           pnpm install --frozen-lockfile
 
       # --------------------------------------------------
-      # 9. 构建 Shadcn Admin
+      # 9. Build Shadcn Admin
       # --------------------------------------------------
       - name: Build Shadcn Admin
+        if: hashFiles('admin/pnpm-lock.yaml') != ''
         working-directory: admin
         run: |
           pnpm build
 
       # --------------------------------------------------
-      # 10. 创建生产环境目录
+      # 10. Prepare release
       # --------------------------------------------------
       - name: Prepare Production Package
         run: |
@@ -123,9 +123,10 @@ jobs:
             ./ release/
 
       # --------------------------------------------------
-      # 11. 复制 Shadcn Admin 编译结果
+      # 11. Copy React production build
       # --------------------------------------------------
-      - name: Copy Admin Build
+      - name: Copy Shadcn Admin Build
+        if: hashFiles('admin/dist/**') != ''
         run: |
           mkdir -p release/public/admin
 
@@ -134,7 +135,7 @@ jobs:
             release/public/admin/
 
       # --------------------------------------------------
-      # 12. 删除开发文件
+      # 12. Remove development files
       # --------------------------------------------------
       - name: Clean Production Package
         run: |
@@ -150,7 +151,15 @@ jobs:
           find release -type f -name '*.map' -delete
 
       # --------------------------------------------------
-      # 13. 生成版本信息
+      # 13. Laravel optimization
+      # --------------------------------------------------
+      - name: Laravel Production Optimization
+        working-directory: release
+        run: |
+          php artisan optimize:clear
+
+      # --------------------------------------------------
+      # 14. Build information
       # --------------------------------------------------
       - name: Generate Build Information
         run: |
@@ -159,22 +168,22 @@ jobs:
           echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> release/build-info.txt
           echo "PHP_VERSION=${PHP_VERSION}" >> release/build-info.txt
           echo "NODE_VERSION=${NODE_VERSION}" >> release/build-info.txt
+          echo "PNPM_VERSION=${PNPM_VERSION}" >> release/build-info.txt
 
       # --------------------------------------------------
-      # 14. 打包
+      # 15. Create production archive
       # --------------------------------------------------
       - name: Create Production Archive
         run: |
           mkdir -p artifacts
 
           tar \
-            --exclude='release/storage/logs/*' \
             -czf \
             artifacts/laravel13-shadcn-admin-${GITHUB_SHA::7}.tar.gz \
             -C release .
 
       # --------------------------------------------------
-      # 15. 生成 SHA256
+      # 16. SHA256
       # --------------------------------------------------
       - name: Generate SHA256
         run: |
@@ -182,7 +191,7 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS.txt
 
       # --------------------------------------------------
-      # 16. 上传 GitHub Artifact
+      # 17. Upload Artifact
       # --------------------------------------------------
       - name: Upload Production Package
         uses: actions/upload-artifact@v6
