@@ -51,8 +51,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
 
 
       # ==========================================================
@@ -62,14 +60,17 @@ jobs:
         run: |
           npm install --global pnpm@${PNPM_VERSION}
 
-          echo "Node:"
+          echo "Node version:"
           node --version
 
-          echo "npm:"
+          echo "npm version:"
           npm --version
 
-          echo "pnpm:"
+          echo "pnpm version:"
           pnpm --version
+
+          echo "pnpm path:"
+          which pnpm
 
 
       # ==========================================================
@@ -89,16 +90,24 @@ jobs:
           ls -la .env* 2>/dev/null || true
 
           echo ""
+          echo "PHP:"
+          php --version
+
+          echo ""
           echo "Composer:"
           composer --version
 
           echo ""
-          echo "PHP:"
-          php --version
+          echo "Node:"
+          node --version
+
+          echo ""
+          echo "pnpm:"
+          pnpm --version
 
 
       # ==========================================================
-      # 6. Verify Laravel environment example
+      # 6. Verify .env.example
       # ==========================================================
       - name: Verify .env.example
         run: |
@@ -113,7 +122,7 @@ jobs:
 
 
       # ==========================================================
-      # 7. Install Composer dependencies
+      # 7. Install Composer Dependencies
       # ==========================================================
       - name: Install Composer Dependencies
         run: |
@@ -130,78 +139,108 @@ jobs:
 
 
       # ==========================================================
-      # 8. Install frontend dependencies
+      # 8. Install Frontend Dependencies
       # ==========================================================
       - name: Install Frontend Dependencies
         run: |
           if [ -f "pnpm-lock.yaml" ]; then
+
             echo "pnpm-lock.yaml detected."
+
             pnpm install --frozen-lockfile
 
           elif [ -f "package-lock.json" ]; then
+
             echo "package-lock.json detected."
+
             npm ci
 
           elif [ -f "yarn.lock" ]; then
+
             echo "yarn.lock detected."
+
             corepack enable
             yarn install --frozen-lockfile
 
           else
+
             echo "::error::No frontend lock file found."
             echo "Expected pnpm-lock.yaml, package-lock.json or yarn.lock."
+
             exit 1
+
           fi
 
 
       # ==========================================================
-      # 9. Build frontend
+      # 9. Build Frontend
       # ==========================================================
       - name: Build Frontend
         run: |
           if [ -f "pnpm-lock.yaml" ]; then
+
             pnpm build
 
           elif [ -f "package-lock.json" ]; then
+
             npm run build
 
           elif [ -f "yarn.lock" ]; then
+
             yarn build
 
           else
+
             echo "::error::Cannot determine frontend package manager."
+
             exit 1
+
           fi
 
 
       # ==========================================================
-      # 10. Verify frontend build
+      # 10. Verify Frontend Build
       # ==========================================================
       - name: Verify Frontend Build
         run: |
           echo "Checking frontend build output..."
 
           if [ -d "public/build" ]; then
-            echo "Laravel Vite build detected:"
+
+            echo "Laravel Vite build detected."
+
             du -sh public/build
-            find public/build -maxdepth 2 -type f | head -30
+
+            find public/build \
+              -maxdepth 2 \
+              -type f \
+              | head -30
 
           elif [ -d "dist" ]; then
-            echo "dist directory detected:"
+
+            echo "dist directory detected."
+
             du -sh dist
-            find dist -maxdepth 2 -type f | head -30
+
+            find dist \
+              -maxdepth 2 \
+              -type f \
+              | head -30
 
           else
+
             echo "::warning::No public/build or dist directory detected."
+
           fi
 
 
       # ==========================================================
-      # 11. Prepare production directory
+      # 11. Prepare Production Package
       # ==========================================================
       - name: Prepare Production Package
         run: |
           rm -rf release
+
           mkdir -p release
 
           rsync -a \
@@ -218,24 +257,33 @@ jobs:
           echo "Production package prepared."
 
           echo ""
-          echo "Environment files in release:"
+          echo "Environment files:"
           ls -la release/.env* 2>/dev/null || true
 
 
       # ==========================================================
-      # 12. Ensure .env is NOT included
+      # 12. Security Check
       # ==========================================================
       - name: Verify Environment Security
         run: |
+
           if [ -f "release/.env" ]; then
+
             echo "::error::Production package contains .env!"
+
             exit 1
+
           fi
 
+
           if [ ! -f "release/.env.example" ]; then
+
             echo "::error::.env.example was not copied into production package!"
+
             exit 1
+
           fi
+
 
           echo ".env security check passed."
 
@@ -244,36 +292,40 @@ jobs:
           ls -lah release/.env.example
 
           echo ""
-          echo "Excluded:"
-          echo "release/.env does not exist."
+          echo ".env excluded successfully."
 
 
       # ==========================================================
-      # 13. Remove development files
+      # 13. Clean Development Files
       # ==========================================================
       - name: Clean Production Package
         run: |
+
           rm -rf release/.git
+
           rm -rf release/.github
+
           rm -rf release/node_modules
 
-          # Source map files are not required for production.
           find release \
             -type f \
-            \( -name "*.map" -o -name "*.log" \) \
+            \( \
+              -name "*.map" \
+              -o -name "*.log" \
+            \) \
             -delete
 
-          # Make sure .env is never included.
           rm -f release/.env
 
           echo "Production cleanup completed."
 
 
       # ==========================================================
-      # 14. Verify Laravel production package
+      # 14. Verify Laravel Package
       # ==========================================================
-      - name: Verify Laravel Package
+      - name: Verify Laravel Production Package
         run: |
+
           required_files=(
             "release/artisan"
             "release/composer.json"
@@ -283,23 +335,33 @@ jobs:
             "release/public/index.php"
           )
 
+
           for file in "${required_files[@]}"; do
+
             if [ ! -e "$file" ]; then
+
               echo "::error::Required file missing: $file"
+
               exit 1
+
             fi
+
           done
+
 
           echo ""
           echo "Laravel production package verification passed."
 
+
           echo ""
-          echo "Package size:"
+          echo "Total package size:"
           du -sh release
+
 
           echo ""
           echo "Vendor size:"
           du -sh release/vendor
+
 
           echo ""
           echo "Public build:"
@@ -307,42 +369,53 @@ jobs:
 
 
       # ==========================================================
-      # 15. Generate build information
+      # 15. Generate Build Information
       # ==========================================================
       - name: Generate Build Information
         run: |
+
           cat > release/build-info.txt <<EOF
-          APP_VERSION=${GITHUB_SHA}
-          BUILD_NUMBER=${GITHUB_RUN_NUMBER}
-          BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-          BRANCH=${GITHUB_REF_NAME}
-          REPOSITORY=${GITHUB_REPOSITORY}
-          PHP_VERSION=${PHP_VERSION}
-          NODE_VERSION=${NODE_VERSION}
-          PNPM_VERSION=${PNPM_VERSION}
-          EOF
+APP_VERSION=${GITHUB_SHA}
+BUILD_NUMBER=${GITHUB_RUN_NUMBER}
+BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+BRANCH=${GITHUB_REF_NAME}
+REPOSITORY=${GITHUB_REPOSITORY}
+PHP_VERSION=${PHP_VERSION}
+NODE_VERSION=${NODE_VERSION}
+PNPM_VERSION=${PNPM_VERSION}
+EOF
+
 
           echo "Build information:"
+
           cat release/build-info.txt
 
 
       # ==========================================================
-      # 16. Create production archive
+      # 16. Create Production Archive
       # ==========================================================
       - name: Create Production Archive
         run: |
+
           mkdir -p artifacts
 
           PACKAGE_NAME="laravel13-shadcn-admin-${GITHUB_SHA::7}.tar.gz"
+
 
           tar \
             -czf "artifacts/${PACKAGE_NAME}" \
             -C release .
 
+
+          echo ""
           echo "Production package:"
+
           ls -lh "artifacts/${PACKAGE_NAME}"
 
+
+          echo ""
           echo "Package size:"
+
           du -h "artifacts/${PACKAGE_NAME}"
 
 
@@ -351,16 +424,19 @@ jobs:
       # ==========================================================
       - name: Generate SHA256
         run: |
+
           cd artifacts
 
           sha256sum *.tar.gz > SHA256SUMS.txt
 
+
           echo "SHA256:"
+
           cat SHA256SUMS.txt
 
 
       # ==========================================================
-      # 18. Upload production artifact
+      # 18. Upload Artifact
       # ==========================================================
       - name: Upload Production Package
         uses: actions/upload-artifact@v6
