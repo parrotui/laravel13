@@ -1,0 +1,179 @@
+name: Build Laravel 13 + Shadcn Admin
+
+on:
+  push:
+    branches:
+      - 13.x
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PHP_VERSION: "8.4"
+  NODE_VERSION: "24"
+  PNPM_VERSION: "10"
+
+jobs:
+  build:
+    name: Build Production Package
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: mbstring, bcmath, intl, pdo_mysql
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+
+      - name: Install pnpm
+        run: |
+          npm install --global pnpm@10
+          node --version
+          npm --version
+          pnpm --version
+          which pnpm
+
+      - name: Check Project
+        run: |
+          pwd
+          ls -lah
+          echo "PHP:"
+          php --version
+          echo "Composer:"
+          composer --version
+          echo "Node:"
+          node --version
+          echo "pnpm:"
+          pnpm --version
+
+      - name: Check Environment Template
+        run: |
+          test -f .env.example || {
+            echo "::error::.env.example not found"
+            exit 1
+          }
+
+      - name: Install Composer Dependencies
+        run: |
+          composer install \
+            --no-dev \
+            --prefer-dist \
+            --no-interaction \
+            --no-progress \
+            --optimize-autoloader
+
+      - name: Install Frontend Dependencies
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f yarn.lock ]; then
+            corepack enable
+            yarn install --frozen-lockfile
+          else
+            echo "::error::No frontend lock file found"
+            exit 1
+          fi
+
+      - name: Build Frontend
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm build
+          elif [ -f package-lock.json ]; then
+            npm run build
+          elif [ -f yarn.lock ]; then
+            yarn build
+          fi
+
+      - name: Prepare Production Package
+        run: |
+          rm -rf release
+          mkdir -p release
+
+          rsync -a \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
+            --exclude='storage/logs/*' \
+            --exclude='.env' \
+            --exclude='*.log' \
+            ./ release/
+
+      - name: Clean Production Package
+        run: |
+          rm -rf release/.git
+          rm -rf release/.github
+          rm -rf release/node_modules
+
+          find release -type f \
+            \( -name "*.map" -o -name "*.log" \) \
+            -delete
+
+          rm -f release/.env
+
+      - name: Verify Production Package
+        run: |
+          test -f release/artisan
+          test -f release/composer.json
+          test -f release/composer.lock
+          test -f release/vendor/autoload.php
+          test -f release/.env.example
+          test -f release/public/index.php
+
+          echo "Production package verification passed."
+
+          echo "Package size:"
+          du -sh release
+
+      - name: Generate Build Information
+        run: |
+          cat > release/build-info.txt <<EOF
+APP_VERSION=${GITHUB_SHA}
+BUILD_NUMBER=${GITHUB_RUN_NUMBER}
+BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+BRANCH=${GITHUB_REF_NAME}
+REPOSITORY=${GITHUB_REPOSITORY}
+PHP_VERSION=8.4
+NODE_VERSION=24
+PNPM_VERSION=10
+EOF
+
+      - name: Create Production Archive
+        run: |
+          mkdir -p artifacts
+
+          tar -czf \
+            "artifacts/laravel13-shadcn-admin-${GITHUB_SHA::7}.tar.gz" \
+            -C release .
+
+      - name: Generate SHA256
+        run: |
+          cd artifacts
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload Production Package
+        uses: actions/upload-artifact@v5
+        with:
+          name: laravel13-shadcn-admin
+          path: |
+            artifacts/*.tar.gz
+            artifacts/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
