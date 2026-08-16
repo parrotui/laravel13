@@ -156,8 +156,6 @@ jobs:
       - name: Laravel Production Optimization
         working-directory: release
         run: |
-          php artisan optimize:clear
-
       # --------------------------------------------------
       # 14. Build information
       # --------------------------------------------------
