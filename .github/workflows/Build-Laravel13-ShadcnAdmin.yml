@@ -1,4 +1,4 @@
-name: Build Laravel 13 + Shadcn Admin
+name: Build Laravel 13 Shadcn Admin
 
 on:
   push:
