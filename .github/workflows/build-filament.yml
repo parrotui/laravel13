@@ -1,9 +1,13 @@
-name: Build Laravel 13 + Filament 5
+name: Build Laravel 13 + Shadcn Admin
 
 on: workflow_dispatch
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build Production Package
     runs-on: ubuntu-latest
 
     steps:
@@ -26,12 +30,23 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install pnpm
+        run: |
+          npm install --global pnpm@10
+          pnpm --version
+
       - name: Check Environment
         run: |
           php -v
           composer -V
           node -v
           npm -v
+          pnpm -v
+
+      - name: Check Laravel Environment
+        run: |
+          test -f .env.example
+          echo ".env.example found"
 
       - name: Install Composer Dependencies
         run: |
@@ -39,31 +54,32 @@ jobs:
             --prefer-dist \
             --no-interaction \
             --no-progress \
-            --optimize-autoloader
+            --optimize-autoloader \
+            --no-dev
 
-      - name: Install Filament 5
+      - name: Install Frontend Dependencies
         run: |
-          composer require filament/filament:^5.0 \
-            --with-all-dependencies \
-            --no-interaction \
-            --no-progress
-
-      - name: Install Filament Panel
-        run: |
-          php artisan filament:install --panels
-
-      - name: Install NPM Dependencies
-        run: |
-          npm install
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "No frontend lock file found"
+            exit 1
+          fi
 
       - name: Build Frontend
         run: |
-          npm run build
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm run build
+          else
+            npm run build
+          fi
 
       - name: Check Versions
         run: |
           php artisan --version
-          composer show filament/filament
+          composer show
           echo "Frontend build:"
           ls -lah public/build
 
@@ -77,16 +93,35 @@ jobs:
             --exclude=".env" \
             --exclude="node_modules" \
             --exclude="tests" \
+            --exclude="storage/logs/*" \
             ./ deploy/
+
+      - name: Verify Deployment Package
+        run: |
+          test -f deploy/artisan
+          test -f deploy/composer.json
+          test -f deploy/composer.lock
+          test -f deploy/vendor/autoload.php
+          test -f deploy/.env.example
+          test -f deploy/public/index.php
+
+          echo "Deployment package verified."
 
       - name: Create Production ZIP
         run: |
           cd deploy
-          zip -r ../laravel13-filament5-production.zip .
+          zip -r ../laravel13-shadcn-admin-production.zip .
+
+      - name: Generate SHA256
+        run: |
+          sha256sum laravel13-shadcn-admin-production.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Upload Production Artifact
         uses: actions/upload-artifact@v5
         with:
-          name: laravel13-filament5-production
-          path: laravel13-filament5-production.zip
-          retention-days: 7
+          name: laravel13-shadcn-admin-production
+          path: |
+            laravel13-shadcn-admin-production.zip
+            SHA256SUMS.txt
+          retention-days: 30
