@@ -30,18 +30,12 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Install pnpm
-        run: |
-          npm install --global pnpm@10
-          pnpm --version
-
       - name: Check Environment
         run: |
           php -v
           composer -V
           node -v
           npm -v
-          pnpm -v
 
       - name: Check Laravel Environment
         run: |
@@ -57,29 +51,25 @@ jobs:
             --optimize-autoloader \
             --no-dev
 
-      - name: Install Frontend Dependencies
+      - name: Check Frontend Configuration
         run: |
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile
-          elif [ -f package-lock.json ]; then
-            npm ci
-          else
-            echo "No frontend lock file found"
-            exit 1
-          fi
+          test -f package.json
+          echo "package.json found"
+          cat package.json
+
+      - name: Install NPM Dependencies
+        run: |
+          npm install
 
       - name: Build Frontend
         run: |
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm run build
-          else
-            npm run build
-          fi
+          npm run build
 
       - name: Check Versions
         run: |
           php artisan --version
           composer show
+          echo ""
           echo "Frontend build:"
           ls -lah public/build
 
@@ -107,14 +97,32 @@ jobs:
 
           echo "Deployment package verified."
 
+          echo ""
+          echo "Package size:"
+          du -sh deploy
+
+          echo ""
+          echo "Vendor size:"
+          du -sh deploy/vendor
+
+          echo ""
+          echo "Frontend build size:"
+          du -sh deploy/public/build
+
       - name: Create Production ZIP
         run: |
           cd deploy
-          zip -r ../laravel13-shadcn-admin-production.zip .
+
+          zip -r \
+            ../laravel13-shadcn-admin-production.zip \
+            .
 
       - name: Generate SHA256
         run: |
-          sha256sum laravel13-shadcn-admin-production.zip > SHA256SUMS.txt
+          sha256sum \
+            laravel13-shadcn-admin-production.zip \
+            > SHA256SUMS.txt
+
           cat SHA256SUMS.txt
 
       - name: Upload Production Artifact
