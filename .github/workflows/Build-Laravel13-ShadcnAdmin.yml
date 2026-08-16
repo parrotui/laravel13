@@ -22,16 +22,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --------------------------------------------------
-      # 1. Checkout
-      # --------------------------------------------------
-      - name: Checkout
-        uses: actions/checkout@v6
 
-      # --------------------------------------------------
+      # ==========================================================
+      # 1. Checkout
+      # ==========================================================
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+
+      # ==========================================================
       # 2. PHP 8.4
-      # --------------------------------------------------
-      - name: Setup PHP
+      # ==========================================================
+      - name: Setup PHP 8.4
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
@@ -39,27 +43,78 @@ jobs:
           tools: composer:v2
           coverage: none
 
-      # --------------------------------------------------
+
+      # ==========================================================
       # 3. Node.js 24
-      # --------------------------------------------------
-      - name: Setup Node.js
+      # ==========================================================
+      - name: Setup Node.js 24
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      # --------------------------------------------------
-      # 4. Install pnpm
-      # --------------------------------------------------
+
+      # ==========================================================
+      # 4. Install pnpm 10
+      # ==========================================================
       - name: Install pnpm
         run: |
           npm install --global pnpm@${PNPM_VERSION}
-          pnpm --version
+
+          echo "Node:"
           node --version
+
+          echo "npm:"
           npm --version
 
-      # --------------------------------------------------
-      # 5. Composer
-      # --------------------------------------------------
+          echo "pnpm:"
+          pnpm --version
+
+
+      # ==========================================================
+      # 5. Check Project
+      # ==========================================================
+      - name: Check Project Files
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Project files:"
+          ls -lah
+
+          echo ""
+          echo "Environment files:"
+          ls -la .env* 2>/dev/null || true
+
+          echo ""
+          echo "Composer:"
+          composer --version
+
+          echo ""
+          echo "PHP:"
+          php --version
+
+
+      # ==========================================================
+      # 6. Verify Laravel environment example
+      # ==========================================================
+      - name: Verify .env.example
+        run: |
+          if [ ! -f ".env.example" ]; then
+            echo "::error::.env.example not found in repository root."
+            echo "Please add .env.example to the Laravel project root."
+            exit 1
+          fi
+
+          echo ".env.example found:"
+          ls -lah .env.example
+
+
+      # ==========================================================
+      # 7. Install Composer dependencies
+      # ==========================================================
       - name: Install Composer Dependencies
         run: |
           composer install \
@@ -69,128 +124,244 @@ jobs:
             --no-progress \
             --optimize-autoloader
 
-      # --------------------------------------------------
-      # 6. Install root frontend dependencies
-      # --------------------------------------------------
-      - name: Install Root Frontend Dependencies
-        if: hashFiles('pnpm-lock.yaml') != ''
-        run: |
-          pnpm install --frozen-lockfile
+          echo ""
+          echo "Vendor installed:"
+          du -sh vendor
 
-      # --------------------------------------------------
-      # 7. Build root frontend
-      # --------------------------------------------------
-      - name: Build Root Frontend
-        if: hashFiles('pnpm-lock.yaml') != ''
-        run: |
-          pnpm build
 
-      # --------------------------------------------------
-      # 8. Install Shadcn Admin
-      # --------------------------------------------------
-      - name: Install Shadcn Admin Dependencies
-        if: hashFiles('admin/pnpm-lock.yaml') != ''
-        working-directory: admin
+      # ==========================================================
+      # 8. Install frontend dependencies
+      # ==========================================================
+      - name: Install Frontend Dependencies
         run: |
-          pnpm install --frozen-lockfile
+          if [ -f "pnpm-lock.yaml" ]; then
+            echo "pnpm-lock.yaml detected."
+            pnpm install --frozen-lockfile
 
-      # --------------------------------------------------
-      # 9. Build Shadcn Admin
-      # --------------------------------------------------
-      - name: Build Shadcn Admin
-        if: hashFiles('admin/pnpm-lock.yaml') != ''
-        working-directory: admin
+          elif [ -f "package-lock.json" ]; then
+            echo "package-lock.json detected."
+            npm ci
+
+          elif [ -f "yarn.lock" ]; then
+            echo "yarn.lock detected."
+            corepack enable
+            yarn install --frozen-lockfile
+
+          else
+            echo "::error::No frontend lock file found."
+            echo "Expected pnpm-lock.yaml, package-lock.json or yarn.lock."
+            exit 1
+          fi
+
+
+      # ==========================================================
+      # 9. Build frontend
+      # ==========================================================
+      - name: Build Frontend
         run: |
-          pnpm build
+          if [ -f "pnpm-lock.yaml" ]; then
+            pnpm build
 
-      # --------------------------------------------------
-      # 10. Prepare release
-      # --------------------------------------------------
+          elif [ -f "package-lock.json" ]; then
+            npm run build
+
+          elif [ -f "yarn.lock" ]; then
+            yarn build
+
+          else
+            echo "::error::Cannot determine frontend package manager."
+            exit 1
+          fi
+
+
+      # ==========================================================
+      # 10. Verify frontend build
+      # ==========================================================
+      - name: Verify Frontend Build
+        run: |
+          echo "Checking frontend build output..."
+
+          if [ -d "public/build" ]; then
+            echo "Laravel Vite build detected:"
+            du -sh public/build
+            find public/build -maxdepth 2 -type f | head -30
+
+          elif [ -d "dist" ]; then
+            echo "dist directory detected:"
+            du -sh dist
+            find dist -maxdepth 2 -type f | head -30
+
+          else
+            echo "::warning::No public/build or dist directory detected."
+          fi
+
+
+      # ==========================================================
+      # 11. Prepare production directory
+      # ==========================================================
       - name: Prepare Production Package
         run: |
           rm -rf release
           mkdir -p release
 
           rsync -a \
-            --exclude='.git' \
-            --exclude='.github' \
-            --exclude='node_modules' \
-            --exclude='admin/node_modules' \
-            --exclude='tests' \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='node_modules/' \
+            --exclude='tests/' \
             --exclude='storage/logs/*' \
             --exclude='.env' \
-            --exclude='.env.*' \
+            --exclude='*.log' \
             ./ release/
 
-      # --------------------------------------------------
-      # 11. Copy React production build
-      # --------------------------------------------------
-      - name: Copy Shadcn Admin Build
-        if: hashFiles('admin/dist/**') != ''
+          echo ""
+          echo "Production package prepared."
+
+          echo ""
+          echo "Environment files in release:"
+          ls -la release/.env* 2>/dev/null || true
+
+
+      # ==========================================================
+      # 12. Ensure .env is NOT included
+      # ==========================================================
+      - name: Verify Environment Security
         run: |
-          mkdir -p release/public/admin
+          if [ -f "release/.env" ]; then
+            echo "::error::Production package contains .env!"
+            exit 1
+          fi
 
-          rsync -a \
-            admin/dist/ \
-            release/public/admin/
+          if [ ! -f "release/.env.example" ]; then
+            echo "::error::.env.example was not copied into production package!"
+            exit 1
+          fi
 
-      # --------------------------------------------------
-      # 12. Remove development files
-      # --------------------------------------------------
+          echo ".env security check passed."
+
+          echo ""
+          echo "Included:"
+          ls -lah release/.env.example
+
+          echo ""
+          echo "Excluded:"
+          echo "release/.env does not exist."
+
+
+      # ==========================================================
+      # 13. Remove development files
+      # ==========================================================
       - name: Clean Production Package
         run: |
           rm -rf release/.git
           rm -rf release/.github
           rm -rf release/node_modules
-          rm -rf release/admin/node_modules
-          rm -rf release/admin/src
 
+          # Source map files are not required for production.
+          find release \
+            -type f \
+            \( -name "*.map" -o -name "*.log" \) \
+            -delete
+
+          # Make sure .env is never included.
           rm -f release/.env
-          rm -f release/.env.*
 
-          find release -type f -name '*.map' -delete
+          echo "Production cleanup completed."
 
-      # --------------------------------------------------
-      # 13. Laravel optimization
-      # --------------------------------------------------
-      - name: Laravel Production Optimization
-        working-directory: release
+
+      # ==========================================================
+      # 14. Verify Laravel production package
+      # ==========================================================
+      - name: Verify Laravel Package
         run: |
-      # --------------------------------------------------
-      # 14. Build information
-      # --------------------------------------------------
+          required_files=(
+            "release/artisan"
+            "release/composer.json"
+            "release/composer.lock"
+            "release/vendor/autoload.php"
+            "release/.env.example"
+            "release/public/index.php"
+          )
+
+          for file in "${required_files[@]}"; do
+            if [ ! -e "$file" ]; then
+              echo "::error::Required file missing: $file"
+              exit 1
+            fi
+          done
+
+          echo ""
+          echo "Laravel production package verification passed."
+
+          echo ""
+          echo "Package size:"
+          du -sh release
+
+          echo ""
+          echo "Vendor size:"
+          du -sh release/vendor
+
+          echo ""
+          echo "Public build:"
+          du -sh release/public/build 2>/dev/null || true
+
+
+      # ==========================================================
+      # 15. Generate build information
+      # ==========================================================
       - name: Generate Build Information
         run: |
-          echo "APP_VERSION=${GITHUB_SHA}" > release/build-info.txt
-          echo "BUILD_NUMBER=${GITHUB_RUN_NUMBER}" >> release/build-info.txt
-          echo "BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> release/build-info.txt
-          echo "PHP_VERSION=${PHP_VERSION}" >> release/build-info.txt
-          echo "NODE_VERSION=${NODE_VERSION}" >> release/build-info.txt
-          echo "PNPM_VERSION=${PNPM_VERSION}" >> release/build-info.txt
+          cat > release/build-info.txt <<EOF
+          APP_VERSION=${GITHUB_SHA}
+          BUILD_NUMBER=${GITHUB_RUN_NUMBER}
+          BUILD_DATE=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          BRANCH=${GITHUB_REF_NAME}
+          REPOSITORY=${GITHUB_REPOSITORY}
+          PHP_VERSION=${PHP_VERSION}
+          NODE_VERSION=${NODE_VERSION}
+          PNPM_VERSION=${PNPM_VERSION}
+          EOF
 
-      # --------------------------------------------------
-      # 15. Create production archive
-      # --------------------------------------------------
+          echo "Build information:"
+          cat release/build-info.txt
+
+
+      # ==========================================================
+      # 16. Create production archive
+      # ==========================================================
       - name: Create Production Archive
         run: |
           mkdir -p artifacts
 
+          PACKAGE_NAME="laravel13-shadcn-admin-${GITHUB_SHA::7}.tar.gz"
+
           tar \
-            -czf \
-            artifacts/laravel13-shadcn-admin-${GITHUB_SHA::7}.tar.gz \
+            -czf "artifacts/${PACKAGE_NAME}" \
             -C release .
 
-      # --------------------------------------------------
-      # 16. SHA256
-      # --------------------------------------------------
+          echo "Production package:"
+          ls -lh "artifacts/${PACKAGE_NAME}"
+
+          echo "Package size:"
+          du -h "artifacts/${PACKAGE_NAME}"
+
+
+      # ==========================================================
+      # 17. Generate SHA256
+      # ==========================================================
       - name: Generate SHA256
         run: |
           cd artifacts
+
           sha256sum *.tar.gz > SHA256SUMS.txt
 
-      # --------------------------------------------------
-      # 17. Upload Artifact
-      # --------------------------------------------------
+          echo "SHA256:"
+          cat SHA256SUMS.txt
+
+
+      # ==========================================================
+      # 18. Upload production artifact
+      # ==========================================================
       - name: Upload Production Package
         uses: actions/upload-artifact@v6
         with:
@@ -198,4 +369,5 @@ jobs:
           path: |
             artifacts/*.tar.gz
             artifacts/SHA256SUMS.txt
+          if-no-files-found: error
           retention-days: 30
