@@ -399,7 +399,7 @@ EOF
 
           mkdir -p artifacts
 
-          PACKAGE_NAME="laravel13-shadcn-admin-${GITHUB_SHA::7}.tar.gz"
+          PACKAGE_NAME="laravel13-shadcn-admin-${GITHUB_SHA}.tar.gz"
 
 
           tar \
